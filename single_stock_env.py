@@ -159,27 +159,54 @@ class SingleStockEnv(gym.Env):
 
 
 if __name__ == '__main__':
-    positions = [0.2, 0.5, 0.8, 0.9]
+    positions = [0.2, 0.5, 0.8, 0.95]
 
     # c = Context()
     # for pos, p in zip(positions, prices):
     #     print(c.step(pos, p))
 
 
-    df = pd.DataFrame()
+    # df = pd.DataFrame()
 
-    dates = ['2022-01-01', '2022-01-02', '2022-01-03', '2022-01-04']
-    # prices = ['2022-01-01', '2022-01-02', '2022-01-03']
-    state1 = [-100]*4
-    state2 = [-1000]*4
-    prices = [25.45, 25.59, 26.34, 26.01]
-    df['date'] = dates
-    df['OPEN'] = prices
-    df['state1'] = state1
-    df['state2'] = state2
-    df['symbol'] = 'test'
+    # dates = ['2022-01-01', '2022-01-02', '2022-01-03', '2022-01-04']
+    # # prices = ['2022-01-01', '2022-01-02', '2022-01-03']
+    # state1 = [-100]*4
+    # state2 = [-1000]*4
+    # prices = [25.45, 25.59, 26.34, 26.01]
+    # df['date'] = dates
+    # df['OPEN'] = prices
+    # df['state1'] = state1
+    # df['state2'] = state2
+    # df['symbol'] = 'test'
+    df = pd.read_csv('df.csv')
 
-    env = SingleStockEnv(df=df, state_cols=['state1', 'state2'], trade_col='OPEN')
+    symbol = '002932.XSHE'
+    df_ = df[df.symbol == symbol].copy()
+    # print(df_)
+
+    state_cols = ['k1d', 'd1d', 'j1d', 'k2h', 'd2h', 'j2h']
+
+    df_new = df_[['date', 'symbol', 'open']]
+    for col in state_cols:
+        df_new[col] = df_[col].shift(1)
+
+    df_new = df_new.dropna()
+    print(df_new)
+    # exit(0)
+
+    # process
+    df_new[state_cols] /= 100
+    # for col in df_new
+    df_new['kj_1d_diff'] = df_new['j1d'] - df_new['k1d']
+    df_new['dj_1d_diff'] = df_new['j1d'] - df_new['d1d']
+
+    df_new['kj_2h_diff'] = df_new['j2h'] - df_new['k2h']
+    df_new['dj_2h_diff'] = df_new['j2h'] - df_new['d2h']
+
+    print(df_new)
+
+    state_cols += ['kj_1d_diff', 'dj_1d_diff', 'kj_2h_diff', 'dj_2h_diff']
+    env = SingleStockEnv(df=df_new, state_cols=state_cols, trade_col='open')
 
     obs = env.reset()
     print(obs)
