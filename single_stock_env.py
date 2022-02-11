@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import gym
 
+def print_variable(v):
+    print(f"{v=}, {type(v)}")
+
 class Context:
     """Maintain the trading records and compute pnl.
     """
@@ -33,21 +36,28 @@ class Context:
         self.ret_history = []
 
     def step(self, position: float, stock_price: float):
+        if isinstance(position, np.ndarray):
+            position = position.item()
         # 结算
         pre_price = self.holding_price_history[-1]
+
         ## 浮盈
         if pre_price ==  -np.inf:
             stock_delta = 0.0
         else:
             pre_stock_units = self.stock_units_history[-1]
             stock_delta = pre_stock_units * (stock_price - pre_price)
+
+        # print_variable(stock_delta)
         # print('==========>')
         # print(f'stock delta: {stock_delta:.4f}')
         # 名义总资产
         cur_capital = self.capital_history[-1] + stock_delta
+        # print_variable(cur_capital)
 
         # 交易
         target_stock_capital = cur_capital * position
+        # print_variable(target_stock_capital)
         target_stock_units = (target_stock_capital * (1 - self.open_commision)) // stock_price
         # print(f"target_stock_units: {target_stock_units}")
         pre_stock_units = self.stock_units_history[-1]
@@ -56,9 +66,14 @@ class Context:
         cost = 0.0
         if target_stock_units > pre_stock_units: # Buy
             units_to_buy = target_stock_units - pre_stock_units
+            # print(f"{pre_stock_units=}, {type(pre_stock_units)}")
+            # print(f"{target_stock_units=}, {type(target_stock_units)}")
+            # print(f"{units_to_buy=}, {type(units_to_buy)}")
             commision_cost = units_to_buy * stock_price * self.open_commision
+            # print(f"{commision_cost=}, {type(commision_cost)}")
             close_tax_cost = 0.0
             cost = commision_cost + close_tax_cost
+            # print(f"{close_tax_cost=}, {type(close_tax_cost)}")
 
         elif target_stock_units < pre_stock_units: # Sell
             units_to_sell = pre_stock_units - target_stock_units
@@ -67,13 +82,19 @@ class Context:
         else:
             pass # do nothing
 
+
+        # print(f"{cost=}, {type(cost)}")
         holding_capital = target_stock_units * stock_price
+        # print(f"{target_stock_units=}, {type(target_stock_units)}")
+        # print(f"{stock_price=}, {type(stock_price)}")
+        # print(f"{holding_capital=}, {type(holding_capital)}")
         cash = cur_capital - cost - holding_capital
 
         real_capital = cash + holding_capital
         pnl = real_capital - self.capital_history[-1]
         ret = real_capital / self.capital_history[-1] - 1.0
 
+        # print(f'{pnl=}, {type(pnl)}')
         self.stock_units_history.append(target_stock_units)
         self.position_history.append(position)
         self.holding_capital_history.append(holding_capital)
@@ -112,13 +133,13 @@ class SingleStockEnv(gym.Env):
             close_commision=close_commision)
 
         self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(1, )) # 0 for buy, 1 for sell, 2 for do nothing
-        self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(self.n_state, ))
+        self.observation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(self.n_state, ))
 
     def _initialize_state(self):
         self.cur_idx = 0
         sample = self.df.iloc[0]
         self.today = sample.date
-        print(self.today)
+        # print('first day: ', self.today)
         cur_position = 0.0
         self.state = np.append(sample[self.state_cols].values, cur_position)
         self.reward = 0.0
@@ -131,12 +152,11 @@ class SingleStockEnv(gym.Env):
         return self.state
 
     def step(self, action: float):
-        assert self.action_space.contains(np.array([action], dtype=np.float32))
+        # print(f"{action=}, {type(action)}")
+        if not isinstance(action, np.ndarray):
+            action = np.array([action], dtype=np.float32)
 
-        sample = self.df.iloc[self.cur_idx]
-        stock_price = sample[self.trade_col]
-        pnl, ret = self.context.step(position=action, stock_price=stock_price)
-        self.today = sample.date
+        assert self.action_space.contains(action)
 
         if self.cur_idx > len(self.df) - 1:
             self.state = np.zeros((self.n_state))
@@ -144,6 +164,12 @@ class SingleStockEnv(gym.Env):
             self.done = True
             self.info = {}
         else:
+            sample = self.df.iloc[self.cur_idx]
+            stock_price = float(sample[self.trade_col])
+            # print(f'+++++++ {type(stock_price)}')
+            pnl, ret = self.context.step(position=action, stock_price=stock_price)
+            self.today = sample.date
+
             cur_position = self.context.position_history[-1]
             self.state = np.append(sample[self.state_cols].values, cur_position)
             self.reward = pnl
@@ -160,6 +186,7 @@ class SingleStockEnv(gym.Env):
 
 if __name__ == '__main__':
     positions = [0.2, 0.5, 0.8, 0.95]
+    positions = [0.2, 0.5]
 
     # c = Context()
     # for pos, p in zip(positions, prices):
@@ -209,11 +236,28 @@ if __name__ == '__main__':
     env = SingleStockEnv(df=df_new, state_cols=state_cols, trade_col='open')
 
     obs = env.reset()
-    print(obs)
+    print(obs, type(obs), obs.shape)
 
-    for action in positions:
-        next_obs, r, done, _ = env.step(action)
-        print(action, r, next_obs)
+    # for action in positions:
+    #     next_obs, r, done, _ = env.step(action)
+    #     print('================')
+    #     print(action, type(action))
+    #     print(r, type(r))
+    #     print(next_obs, type(next_obs))
+
+
+    print('==========')
+    env = gym.make('CartPole-v0')
+    obs = env.reset()
+    print(obs, type(obs), obs.shape)
+
+    # action = env.action_space.sample()
+    # print(action, type(action))
+
+    # next_obs, r, done, _ = env.step(action)
+    # print(action, type(action))
+    # print(r, type(r))
+    # print(next_obs, type(next_obs))
 
 
 

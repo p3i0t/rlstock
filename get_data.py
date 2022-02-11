@@ -99,7 +99,7 @@ def fetch_one_day_trend(date, stocks: List[str] = None):
 if __name__ == '__main__':
     stocks = ['600706.XSHG', '600847.XSHG', '002932.XSHE']
 
-    from_date = '2021-10-01'
+    from_date = '2021-06-01'
     data_dir = 'daily_data'
 
     if not os.path.exists(data_dir):
