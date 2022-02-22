@@ -4,7 +4,9 @@ import os
 import numpy as np
 import pandas as pd
 import gym
+
 import ray
+from ray.rllib.models import ModelCatalog
 from ray.rllib.agents import ppo
 from ray.rllib.agents.ppo import PPOTrainer
 from ray.rllib.env.env_context import EnvContext
@@ -13,9 +15,10 @@ from ray.tune.registry import register_env
 from ray import tune
 
 from single_stock_env import SingleStockEnv
+from models import MyFCNet
 
 ray.shutdown()
-ray.init(num_cpus=10)
+ray.init(num_cpus=22)
 
 
 def process_df():
@@ -43,7 +46,7 @@ def env_creator(env_config: Dict):
     df = pd.read_csv('df_processed.csv')
     sample = df[df.symbol == env_config['symbol']].sort_values('date').copy()
 
-    df_sample = sample[['date', 'symbol', env_config['trade_col']]]
+    df_sample = sample[['date', 'symbol', env_config['trade_col']]].copy()
     for col in state_cols:
         df_sample[col] = sample[col].shift(1)
     df_sample = df_sample.dropna()
@@ -51,44 +54,79 @@ def env_creator(env_config: Dict):
     n_days = len(df_sample)
 
     print(f"game length: {len(df_sample)}")
-    bound = int(0.8 * n_days)
+    # bound = int(0.8 * n_days)
 
-    if env_config['mode'] == 'train':
-        df_run = df_sample[:bound]
-    else:
-        df_run = df_sample[bound:]
-    env = SingleStockEnv(df=df_run, state_cols=state_cols, trade_col=env_config['trade_col'])
+    # if env_config['mode'] == 'train':
+    #     df_run = df_sample[:bound]
+    # else:
+    #     df_run = df_sample[bound:]
+    df_run = df_sample
+    env = SingleStockEnv(df=df_run, state_cols=state_cols, trade_col=env_config['trade_col'], initial_money=100000)
     return env
 
 
 register_env('my_env', env_creator=env_creator)
+
+ModelCatalog.register_custom_model(
+    'my_fc', MyFCNet
+)
+
 config = {
     'env': "my_env",
     'env_config': {
         'dataframe_path': 'df.csv',
-        'symbol': '601088.XSHG', # single stock symbol
+        # 'symbol': '601088.XSHG', # single stock symbol
+        # 'symbol': '600866.XSHG', # single stock symbol
+        # 'symbol': '600466.XSHG', # single stock symbol
+        # 'symbol': '600546.XSHG', # single stock symbol
+        # 'symbol': '603363.XSHG', # single stock symbol
+        # 'symbol': '601615.XSHG', # single stock symbol
+        # 'symbol': '603858.XSHG', # single stock symbol
+        # 'symbol': '600732.XSHG', # single stock symbol
         # 'symbol': '002932.XSHE', # single stock symbol
+        # 'symbol': '000402.XSHE', # single stock symbol
+        # 'symbol': '002605.XSHE', # single stock symbol
+        # 'symbol': '002815.XSHE', # single stock symbol
+        # 'symbol': '002408.XSHE', # single stock symbol
+        # 'symbol': '603719.XSHG', # single stock symbol
+        # 'symbol': '603650.XSHG', # single stock symbol
+        # 'symbol': '600171.XSHG', # single stock symbol
+        # 'symbol': '002867.XSHE', # single stock symbol
+        # 'symbol': '001965.XSHE', # single stock symbol
+        'symbol': '605358.XSHG', # single stock symbol
+        # 'trade_col': 'avg', # trading price
         'trade_col': 'avg', # trading price
         'mode': 'train'
     },
+    'normalize_actions': True, # clip actions to be in range [low, high]
 
     # 'env': 'CartPole-v0',
-    'num_workers': 5,
-    'framework': 'tf',
+    'num_workers': 20,
+    'framework': 'torch',
+    # 'framework': 'tf',
     'model': {
-        'fcnet_hiddens': [64, 64],
-        'fcnet_activation': 'relu',
+        # 'custom_model': 'my_fc',
+        # 'fcnet_hiddens': [64, 64],
+        'fcnet_hiddens': [128, 128],
+        'fcnet_activation': 'tanh',
+
+        ## LSTM
+        # 'use_lstm': True,
+        # 'max_seq_len': 10,
+        # 'lstm_cell_size': 128
     },
     'lr': 1e-3,
     'evaluation_num_workers': 1,
     'evaluation_config': {
         'render_env': False
     },
-    'log_level': 'WARN'
+
+    'vf_clip_param': 100,
+    'log_level': 'WARN',
 }
 
 stop = {
-    "training_iteration": 100,
+    "training_iteration": 100.0,
     "timesteps_total": 100000,
     # "episode_reward_mean": 199
 }
@@ -115,7 +153,6 @@ if train is True:
         print(pretty_print(result))
         if result['timesteps_total'] >= stop['timesteps_total']:
             break
-
 
     res = trainer.save(save_dir)
     print(res)
@@ -150,7 +187,7 @@ else:
             n_episodes += 1
             ep_reward = 0.0
         else:
-            print(f"date: {info['date']}, pnl: {reward}, position: {a.item()}")
+            print(f"date: {info['date']}, pnl: {reward:9.2f}, position: {a.item():6.4f}, ret: {info['step_ret']:6.4f}")
 
 ray.shutdown()
 

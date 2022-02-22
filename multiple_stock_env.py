@@ -4,20 +4,21 @@ import numpy as np
 import pandas as pd
 import gym
 
-def print_variable(v):
-    print(f"{v=}, {type(v)}")
 
 class Context:
     """Maintain the trading records and compute pnl.
     """
     def __init__(
-        self, initial_money: float = 100000,
+        self,
+        n_stocks: int,
+        initial_money: float = 100000,
         close_tax: float = 0.001,
         open_commision: float = 0.0003,
         close_commision: float = 0.0003) -> None:
 
         # total_capital = position * holding_price + cash
 
+        self.n_stocks = n_stocks
         self.initial_money = initial_money
         self.close_tax = close_tax
         self.open_commision = open_commision
@@ -26,73 +27,79 @@ class Context:
         self._initialize()
 
     def _initialize(self):
-        self.position_history = [0.0]
-        self.stock_units_history = [0]
-        self.holding_price_history = [-np.inf]
-        self.holding_capital_history = [0.0]
-        self.cash_history = [self.initial_money]
-        self.capital_history = [self.initial_money]
+        zero = np.zeros((self.n_stocks,), dtype=np.float32)
+        self.position_history = [zero]
+        self.stock_units_history = [zero]
+        neg_inf = zero - np.inf
+        self.holding_price_history = [neg_inf]
+        self.holding_capital_history = [zero]
+        self.cash_history = [self.initial_money]     # 账户现金
+        self.capital_history = [self.initial_money]  # 账面价值
         self.pnl_history = []
         self.ret_history = []
+        self.logret_history = []
 
-    def step(self, position: float, stock_price: float):
-        if isinstance(position, np.ndarray):
-            position = position.item()
+    def step(self, position: np.ndarray, stock_price: np.ndarray):
+        """perform one step trading.
+
+        Args:
+            position (np.ndarray): 1d target positions, sum(position) <= 1.
+            stock_price (np.ndarray): transaction price.
+
+        # Returns:
+        #     _type_: _description_
+        """
+        assert len(position.shape) == 1 and len(stock_price) == 1, \
+            "position and stock_price should be 1d arrays."
+
+        target_stock_position_sum = np.sum(position)
+        assert target_stock_position_sum <= 1.0
+
         # 结算
         pre_price = self.holding_price_history[-1]
-
         ## 浮盈
-        if pre_price ==  -np.inf:
+        if (pre_price ==  -np.inf).all():
             stock_delta = 0.0
         else:
+            # "交易单位时间内的盈亏"
             pre_stock_units = self.stock_units_history[-1]
             stock_delta = pre_stock_units * (stock_price - pre_price)
 
-        # print_variable(stock_delta)
-        # print('==========>')
-        # print(f'stock delta: {stock_delta:.4f}')
-        # 名义总资产
+        # 名义总资产 = 上一期总资产 + 当期浮盈
         cur_capital = self.capital_history[-1] + stock_delta
-        # print_variable(cur_capital)
 
         # 交易
-        target_stock_capital = cur_capital * position
-        # print_variable(target_stock_capital)
-        target_stock_units = (target_stock_capital * (1 - self.open_commision)) // stock_price
+        target_stock_capital = cur_capital * target_stock_position_sum
+        # 简单估计，不是最终的真实的目标交易单位
+        target_stock_units = (target_stock_capital * position * (1 - self.open_commision)) // stock_price
         # print(f"target_stock_units: {target_stock_units}")
         pre_stock_units = self.stock_units_history[-1]
         # print(f"pre_stock_units: {pre_stock_units}")
 
-        cost = 0.0
-        if target_stock_units > pre_stock_units: # Buy
-            units_to_buy = target_stock_units - pre_stock_units
-            # print(f"{pre_stock_units=}, {type(pre_stock_units)}")
-            # print(f"{target_stock_units=}, {type(target_stock_units)}")
-            # print(f"{units_to_buy=}, {type(units_to_buy)}")
-            commision_cost = units_to_buy * stock_price * self.open_commision
-            # print(f"{commision_cost=}, {type(commision_cost)}")
-            close_tax_cost = 0.0
-            cost = commision_cost + close_tax_cost
-            # print(f"{close_tax_cost=}, {type(close_tax_cost)}")
+        buy_in_idx = (target_stock_units > pre_stock_units)
+        sell_out_idx = (target_stock_units < pre_stock_units)
 
-        elif target_stock_units < pre_stock_units: # Sell
-            units_to_sell = pre_stock_units - target_stock_units
-            cost = (self.close_tax + self.close_commision) * units_to_sell * stock_price
+        # 待买入部分的股票的交易成本
+        units_to_buy = (target_stock_units - pre_stock_units)
+        commision_cost = (units_to_buy * stock_price)[buy_in_idx] * self.open_commision
+        buy_cost = commision_cost # commision only
 
-        else:
-            pass # do nothing
+        units_to_sell = (pre_stock_units - target_stock_units)
+        sell_cost = (self.close_tax + self.close_commision) * (units_to_sell * stock_price)[sell_out_idx]
 
+        cost = buy_cost + sell_cost
 
-        # print(f"{cost=}, {type(cost)}")
-        holding_capital = target_stock_units * stock_price
+        holding_capital = np.sum(target_stock_units * stock_price)
         # print(f"{target_stock_units=}, {type(target_stock_units)}")
         # print(f"{stock_price=}, {type(stock_price)}")
         # print(f"{holding_capital=}, {type(holding_capital)}")
         cash = cur_capital - cost - holding_capital
 
+        # 扣除交易成本之后的账面资产
         real_capital = cash + holding_capital
         pnl = real_capital - self.capital_history[-1]
         ret = real_capital / self.capital_history[-1] - 1.0
+        logret = (real_capital / self.capital_history[-1])
 
         # print(f'{pnl=}, {type(pnl)}')
         self.stock_units_history.append(target_stock_units)
@@ -103,22 +110,26 @@ class Context:
         self.capital_history.append(real_capital)
         self.pnl_history.append(pnl)
         self.ret_history.append(ret)
+        self.logret_history.append(logret)
 
-        return pnl, ret
+        return pnl, ret, logret
 
     # def get_capital()
 
 
-class SingleStockEnv(gym.Env):
-    def __init__(self, df: pd.DataFrame, state_cols: List[str],
-                 trade_col: str = 'OPEN',
+class MultipleStockEnv(gym.Env):
+    def __init__(self, df: pd.DataFrame,
+                 state_cols: List[str],
+                 trade_col: str = 'OPEN', # 目标成交价格
                  initial_money: float = 100000,
                  close_tax: float = 0.001,
                  open_commision: float = 0.0003,
                  close_commision: float = 0.0003) -> None:
         super().__init__()
-        self.df = df.sort_values('date')
-        assert len(self.df) > 2
+
+        self.df = df.reset_index(drop=True).set_index(['date', 'symbol']).sort_index()
+        # self.df = df.sort_values('date')
+        # assert len(self.df) > 2
         # print(set(['symbol', 'date', trade_col] + state_cols))
         # print(set(df.columns))
         assert set(['symbol', 'date', trade_col] + state_cols).issubset(set(df.columns)), f'some columns are missing.'
