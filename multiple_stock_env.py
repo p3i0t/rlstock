@@ -81,11 +81,19 @@ class Context:
 
         # 待买入部分的股票的交易成本
         units_to_buy = (target_stock_units - pre_stock_units)
-        commision_cost = (units_to_buy * stock_price)[buy_in_idx] * self.open_commision
-        buy_cost = commision_cost # commision only
+        if np.sum(buy_in_idx) > 0:
+            commision_cost = (units_to_buy * stock_price)[buy_in_idx] * self.open_commision
+            buy_cost = commision_cost # commision only
+        else:
+            # 没有需要买入的
+            buy_cost = 0
 
-        units_to_sell = (pre_stock_units - target_stock_units)
-        sell_cost = (self.close_tax + self.close_commision) * (units_to_sell * stock_price)[sell_out_idx]
+        if np.sum(sell_out_idx) > 0:
+            units_to_sell = (pre_stock_units - target_stock_units)
+            sell_cost = (self.close_tax + self.close_commision) * (units_to_sell * stock_price)[sell_out_idx]
+        else:
+            # 没有要卖出的
+            sell_cost = 0.0
 
         cost = buy_cost + sell_cost
 
@@ -127,7 +135,12 @@ class MultipleStockEnv(gym.Env):
                  close_commision: float = 0.0003) -> None:
         super().__init__()
 
-        self.df = df.reset_index(drop=True).set_index(['date', 'symbol']).sort_index()
+        dates = df['date'].unique().values
+        symbols = df['symbol'].unique().values
+        m_index = pd.MultiIndex.from_product([dates, symbols])
+
+        self.df = df.reindex(m_index)
+        # self.df = df.reset_index(drop=True).set_index(['date', 'symbol']).sort_index()
         # self.df = df.sort_values('date')
         # assert len(self.df) > 2
         # print(set(['symbol', 'date', trade_col] + state_cols))
